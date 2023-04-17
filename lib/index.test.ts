@@ -1,4 +1,4 @@
-import { ChatSessionManager, ChatSession, ChatData } from '.';
+import { ChatSessionManager, ChatSession, ChatData } from './openai';
 
 class MockChatSession extends ChatSession {
   private data: { [key: string]: ChatData } = {};
@@ -25,10 +25,7 @@ describe('ChatSessionManager', () => {
   });
 
   afterEach(async () => {
-    const session = await chatSessionManager.getSession().getItem(sessionId);
-    if (session) {
-      await chatSessionManager.getSession().deleteItem(sessionId);
-    }
+
   });
 
   test('getAnswer creates a new session if it does not exist', async () => {
@@ -37,6 +34,7 @@ describe('ChatSessionManager', () => {
     expect(messages[0].role).toBe('user');
     expect(messages[0].content).toBe('What is the capital of France?');
     expect(messages[1].role).toBe('assistant');
+    console.log(messages);
   });
 
   test('getAnswer appends messages to an existing session', async () => {
@@ -46,6 +44,7 @@ describe('ChatSessionManager', () => {
     expect(messages[2].role).toBe('user');
     expect(messages[2].content).toBe('What is the capital of Germany?');
     expect(messages[3].role).toBe('assistant');
+    console.log(messages);
   });
 
   // Add more tests as needed

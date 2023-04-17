@@ -33,7 +33,9 @@ export class ChatSessionManager {
     constructor(options: ChatSessionManagerOptions) {
         if (options.session == null) {
             this.session = new ChatSessionDynamoDBTable({ table: "chat" });
-        }
+        } else {
+            this.session = options.session;
+        }        
     }
 
     async getAnswer(sessionId: string, prompt: string, model: string = "gpt-3.5-turbo"): Promise<ChatMessage[]> {
