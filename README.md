@@ -1,6 +1,6 @@
 # OpenAI Chat Session Manager
 
-OpenAI Chat Session Manager is a TypeScript module designed to manage chat sessions with an AI model (default : GPT-3.5 Turbo) through the OpenAI API. This module provides a convenient way to store and retrieve chat histories, utilizing AWS DynamoDB for storage.
+OpenAI Chat Session Manager is a TypeScript module designed to manage chat sessions with an AI model (default : GPT-3.5 Turbo) through the OpenAI API. This module provides a convenient way to store and retrieve chat histories, utilizing AWS DynamoDB for storage. It is based on the implementation described in [this blog post](https://tobelinuxer.tistory.com/70).
 
 ## Features
 
