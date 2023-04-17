@@ -34,6 +34,7 @@ describe('ChatSessionManager', () => {
     expect(messages[0].role).toBe('user');
     expect(messages[0].content).toBe('What is the capital of France?');
     expect(messages[1].role).toBe('assistant');
+    expect(messages[1].content).toContain('Paris');
     console.log(messages);
   });
 
@@ -44,6 +45,7 @@ describe('ChatSessionManager', () => {
     expect(messages[2].role).toBe('user');
     expect(messages[2].content).toBe('What is the capital of Germany?');
     expect(messages[3].role).toBe('assistant');
+    expect(messages[3].content).toContain('Berlin');
     console.log(messages);
   });
 
