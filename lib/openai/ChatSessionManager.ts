@@ -25,17 +25,24 @@ export abstract class ChatSession {
 
 export interface ChatSessionManagerOptions {
     session?: ChatSession;
+    max_tokens?: number;
+    temperature?: number;
 }
 
 export class ChatSessionManager {
     private session: ChatSession;
+    private max_tokens: number;
+    private temperature: number;
 
     constructor(options: ChatSessionManagerOptions) {
         if (options.session == null) {
             this.session = new ChatSessionDynamoDBTable({ table: "chat" });
         } else {
             this.session = options.session;
-        }        
+        }
+
+        this.max_tokens = options.max_tokens ? options.max_tokens : 50;
+        this.temperature = options.temperature ? options.temperature : 1.0;
     }
 
     async getAnswer(sessionId: string, prompt: string, model: string = "gpt-3.5-turbo"): Promise<ChatMessage[]> {
@@ -61,10 +68,10 @@ export class ChatSessionManager {
         const data = {
             model: model,
             messages: [...messagesWithoutTokens, userMessage],
-            max_tokens: 50,
+            max_tokens: this.max_tokens,
             n: 1,
             stop: null,
-            temperature: 1.0,
+            temperature: this.temperature,
         };
 
         try {
