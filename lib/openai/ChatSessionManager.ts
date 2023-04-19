@@ -7,6 +7,7 @@ export interface ChatMessage {
     role: "user" | "assistant";
     content: string;
     token?: number;
+    created?: number;
 }
 
 export interface ChatData {
@@ -55,7 +56,7 @@ export class ChatSessionManager {
             history.lastUpdate = new Date().getTime();
         }
 
-        let userMessage: ChatMessage = { role: "user", content: prompt };
+        let userMessage: ChatMessage = { role: "user", content: prompt, created: new Date().getTime() };
 
         const apiUrl = 'https://api.openai.com/v1/chat/completions';
         const headers = {
@@ -63,11 +64,11 @@ export class ChatSessionManager {
             'Authorization': `Bearer ${OPENAI_API_KEY}`,
         };
 
-        const messagesWithoutTokens = history.messages.map((msg) => ({ role: msg.role, content: msg.content }));
+        const messages = history.messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
         const data = {
             model: model,
-            messages: [...messagesWithoutTokens, userMessage],
+            messages: [...messages, { role: userMessage.role, content: userMessage.content }],
             max_tokens: this.max_tokens,
             n: 1,
             stop: null,
@@ -82,7 +83,7 @@ export class ChatSessionManager {
             const completionTokens = response.data.usage.completion_tokens;
             const totalTokens = response.data.usage.total_tokens;
 
-            let assistantMessage: ChatMessage = { role: "assistant", content: content, token: completionTokens };
+            let assistantMessage: ChatMessage = { role: "assistant", content: content, token: completionTokens, created: new Date().getTime() };
             userMessage.token = promptTokens;
             history.messages.push(userMessage);
             history.messages.push(assistantMessage);
