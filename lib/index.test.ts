@@ -1,4 +1,5 @@
 import { ChatSessionManager, ChatSession, ChatData } from './openai';
+import stream from 'stream';
 
 class MockChatSession extends ChatSession {
   private data: { [key: string]: ChatData } = {};
@@ -48,6 +49,32 @@ describe('ChatSessionManager', () => {
     expect(messages[3].content).toContain('Berlin');
     console.log(messages);
   });
+
+  test('getAnswerStream creates a new session if it does not exist', async () => {
+    const answerStream = await chatSessionManager.getAnswerStream(sessionId, 'What is the capital of France?');
+
+    expect(answerStream).toBeInstanceOf(stream.Writable);
+
+    const chunks = [];
+    const testStream = new stream.Writable({
+      write(chunk, encoding, next) {
+        console.log(chunk);
+        chunks.push(chunk);
+        next();
+      },
+    });
+
+    answerStream.pipe(testStream);
+
+    await new Promise((resolve) => {
+      testStream.on('finish', resolve);
+    });
+
+    const output = Buffer.concat(chunks).toString();
+
+    console.log(output);
+  });
+
 
   // Add more tests as needed
 });

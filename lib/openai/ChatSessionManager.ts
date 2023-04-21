@@ -1,5 +1,7 @@
 import axios from "axios";
 import { ChatSessionDynamoDBTable } from "./ChatSessionDynamoDBTable";
+import { encoding_for_model, TiktokenModel } from "@dqbd/tiktoken";
+import stream from "stream";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -96,4 +98,112 @@ export class ChatSessionManager {
             throw error;
         }
     }
+
+    async getAnswerStream(sessionId: string, prompt: string, model: TiktokenModel = "gpt-3.5-turbo") {
+        let history = await this.session.getItem(sessionId);
+
+        if (history == null) {
+            history = { sessionId, created: new Date().getTime(), messages: [], totalTokens: 0 };
+        } else {
+            history.lastUpdate = new Date().getTime();
+        }
+
+        const encoder = encoding_for_model(model);
+
+        let tokens = encoder.encode(prompt);
+
+        const userMessage: ChatMessage = { role: 'user', content: prompt, created: new Date().getTime(), token: tokens.length };
+        
+        history.totalTokens += userMessage.token;
+
+        const apiUrl = 'https://api.openai.com/v1/chat/completions';
+        const headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${OPENAI_API_KEY}`,
+        };
+
+        const messages = history.messages.map((msg) => ({ role: msg.role, content: msg.content }));
+
+        const data = {
+            model,
+            messages: [...messages, { role: userMessage.role, content: userMessage.content }],
+            max_tokens: this.max_tokens,
+            n: 1,
+            stop: null,
+            temperature: this.temperature,
+            stream: true
+        };
+
+        try {
+            const response = await axios.post(apiUrl, data, {
+                headers,
+                responseType: 'stream',
+            });
+
+            const assistantMessage: ChatMessage = {
+                role: 'assistant',
+                content: '',
+                token: 0,
+                created: 0,
+            };
+
+            history.messages.push(userMessage);
+            history.messages.push(assistantMessage);
+
+            // Use a stream to handle the incoming data
+            const dataStream = new stream.Transform({
+                transform(chunk, encoding, next) {
+                    let str = chunk.toString();
+                    const arr = str.split('\n');
+                    this.push(str);
+
+                    arr.forEach((data: string) => {
+                        if (data.length === 0) return; // ignore empty message
+                        if (data.startsWith(':')) return; // ignore sse comment message
+                        if (data === 'data: [DONE]') {
+                            assistantMessage.token = encoder.encode(assistantMessage.content).length;
+                            history.totalTokens += assistantMessage.token;
+
+                            console.log(history);
+
+                            encoder.free();
+                            return;
+                        }
+
+                        try {
+                            const json = JSON.parse(data.substring(6));
+
+                            if (assistantMessage.created == 0) {
+                                assistantMessage.created = new Date().getTime();
+                            }
+
+                            const delta = json.choices[0].delta.content;
+
+                            if (delta) {
+                                assistantMessage.content += delta;
+                            }
+
+                        } catch (err) {
+                            console.error(err);
+                        }
+
+                    });
+
+                    next();
+                },
+            });
+
+            dataStream.on('finish', async () => {
+                await this.session.putItem(sessionId, history);
+            });
+
+            response.data.pipe(dataStream);
+
+            return dataStream;
+        } catch (error) {
+            console.error('Error while fetching data from OpenAI API:', error);
+            throw error;
+        }
+    }
 }
+
