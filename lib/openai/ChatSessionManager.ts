@@ -164,8 +164,6 @@ export class ChatSessionManager {
                             assistantMessage.token = encoder.encode(assistantMessage.content).length;
                             history.totalTokens += assistantMessage.token;
 
-                            console.log(history);
-
                             encoder.free();
                             return;
                         }

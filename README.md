@@ -19,7 +19,7 @@ export OPENAI_API_KEY="your_openai_api_key"
 ## Installation
 
 ```bash
-npm install axios aws-sdk
+npm install openai-chat-session-manager
 ```
 
 ## Usage
