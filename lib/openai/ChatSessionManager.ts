@@ -150,26 +150,34 @@ export class ChatSessionManager {
             history.messages.push(userMessage);
             history.messages.push(assistantMessage);
 
+            let buffer = '';
+
             // Use a stream to handle the incoming data
             const dataStream = new stream.Transform({
                 transform(chunk, encoding, next) {
                     let str = chunk.toString();
-                    const arr = str.split('\n');
                     this.push(str);
 
-                    arr.forEach((data: string) => {
-                        if (data.length === 0) return; // ignore empty message
-                        if (data.startsWith(':')) return; // ignore sse comment message
-                        if (data === 'data: [DONE]') {
+                    buffer += str;
+                    let lineEndIndex: number;
+
+                    while ((lineEndIndex = buffer.indexOf('\n')) !== -1) {
+                        const line = buffer.slice(0, lineEndIndex);
+                        buffer = buffer.slice(lineEndIndex + 1);
+
+                        if (line.length === 0) continue; // ignore empty message
+                        if (line.startsWith(':')) continue; // ignore sse comment message
+
+                        if (line === 'data: [DONE]') {
                             assistantMessage.token = encoder.encode(assistantMessage.content).length;
                             history.totalTokens += assistantMessage.token;
 
                             encoder.free();
-                            return;
+                            break;
                         }
 
                         try {
-                            const json = JSON.parse(data.substring(6));
+                            const json = JSON.parse(line.substring(6));
 
                             if (assistantMessage.created == 0) {
                                 assistantMessage.created = new Date().getTime();
@@ -184,14 +192,14 @@ export class ChatSessionManager {
                         } catch (err) {
                             console.error(err);
                         }
-
-                    });
+                    };
 
                     next();
                 },
             });
 
             dataStream.on('finish', async () => {
+                console.log("finish");
                 await this.session.putItem(sessionId, history);
             });
 
