@@ -198,8 +198,14 @@ export class ChatSessionManager {
                 },
             });
 
+            dataStream.on('close', async () => {
+                assistantMessage.token = encoder.encode(assistantMessage.content).length;
+                history.totalTokens += assistantMessage.token;
+                encoder.free();
+                await this.session.putItem(sessionId, history);
+            });
+
             dataStream.on('finish', async () => {
-                console.log("finish");
                 await this.session.putItem(sessionId, history);
             });
 
