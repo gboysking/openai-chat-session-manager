@@ -151,7 +151,7 @@ export class ChatSessionManager {
             history.messages.push(assistantMessage);
 
             let buffer = '';
-
+            let done = false;
             // Use a stream to handle the incoming data
             const dataStream = new stream.Transform({
                 transform(chunk, encoding, next) {
@@ -173,6 +173,7 @@ export class ChatSessionManager {
                             history.totalTokens += assistantMessage.token;
 
                             encoder.free();
+                            done = true;
                             break;
                         }
 
@@ -199,10 +200,12 @@ export class ChatSessionManager {
             });
 
             dataStream.on('close', async () => {
-                assistantMessage.token = encoder.encode(assistantMessage.content).length;
-                history.totalTokens += assistantMessage.token;
-                encoder.free();
-                await this.session.putItem(sessionId, history);
+                if ( done == false) {
+                    assistantMessage.token = encoder.encode(assistantMessage.content).length;
+                    history.totalTokens += assistantMessage.token;
+                    encoder.free();
+                    await this.session.putItem(sessionId, history);
+                }                
             });
 
             dataStream.on('finish', async () => {
