@@ -151,7 +151,8 @@ export class ChatSessionManager {
             history.messages.push(assistantMessage);
 
             let buffer = '';
-            let done = false;
+            let tokenCaculate = false;
+            let saved = false;
             // Use a stream to handle the incoming data
             const dataStream = new stream.Transform({
                 transform(chunk, encoding, next) {
@@ -173,7 +174,7 @@ export class ChatSessionManager {
                             history.totalTokens += assistantMessage.token;
 
                             encoder.free();
-                            done = true;
+                            tokenCaculate = true;
                             break;
                         }
 
@@ -200,16 +201,30 @@ export class ChatSessionManager {
             });
 
             dataStream.on('close', async () => {
-                if ( done == false) {
+                if (tokenCaculate == false) {
+                    assistantMessage.token = encoder.encode(assistantMessage.content).length;
+                    history.totalTokens += assistantMessage.token;
+                    encoder.free();   
+                    tokenCaculate = true;                
+                }
+
+                if ( saved == false) {
+                    await this.session.putItem(sessionId, history);
+                    saved = true;
+                }                
+            });
+            dataStream.on('finish', async () => {
+                if (tokenCaculate == false) {
                     assistantMessage.token = encoder.encode(assistantMessage.content).length;
                     history.totalTokens += assistantMessage.token;
                     encoder.free();
-                    await this.session.putItem(sessionId, history);
-                }                
-            });
+                    tokenCaculate = true;
+                }
 
-            dataStream.on('finish', async () => {
-                await this.session.putItem(sessionId, history);
+                if ( saved == false) {
+                    await this.session.putItem(sessionId, history);
+                    saved = true;
+                }
             });
 
             response.data.pipe(dataStream);
