@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { isAxiosError } from "axios";
 import { ChatSessionDynamoDBTable } from "./ChatSessionDynamoDBTable";
 import { encoding_for_model, TiktokenModel } from "@dqbd/tiktoken";
 import stream from "stream";
@@ -6,7 +6,7 @@ import stream from "stream";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 export interface ChatMessage {
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "system";
     content: string;
     token?: number;
     created?: number;
@@ -32,6 +32,42 @@ export interface ChatSessionManagerOptions {
     temperature?: number;
 }
 
+function calculateTokenSum(messages: ChatMessage[]): number {
+    const tokenValues = messages.map((message) => message.token || 0);
+    const tokenSum = tokenValues.reduce((sum, value) => sum + value, 0);
+    return tokenSum;
+}
+
+function extractMessagesWithinTokenLimit(
+    messages: ChatMessage[],
+    messageTokens: number,
+    maxRequestTokens: number
+): ChatMessage[] {
+    let tokenSum = calculateTokenSum(messages);
+    while (tokenSum + messageTokens > maxRequestTokens) {
+        const deletedMessage = messages.shift();
+        if (deletedMessage) {
+            const deletedMessageTokens = deletedMessage.token || 0;
+            tokenSum -= (deletedMessageTokens);
+        } else {
+            break; // No more messages to delete
+        }
+    }
+
+    return messages;
+}
+
+function requestMaxTokens(model: TiktokenModel = "gpt-3.5-turbo"): number {
+    switch (model) {
+        case "gpt-3.5-turbo":
+            return 4096;
+        case "gpt-4":
+            return 8192;
+        default:
+            throw new Error("Unsupported model");
+    }
+}
+
 export class ChatSessionManager {
     private session: ChatSession;
     private max_tokens: number;
@@ -48,7 +84,7 @@ export class ChatSessionManager {
         this.temperature = options.temperature ? options.temperature : 1.0;
     }
 
-    async getAnswer(sessionId: string, prompt: string, model: string = "gpt-3.5-turbo"): Promise<ChatMessage[]> {
+    async getAnswer(sessionId: string, message: string, model: TiktokenModel = "gpt-3.5-turbo"): Promise<ChatMessage[]> {
 
         let history: ChatData | null = await this.session.getItem(sessionId);
 
@@ -58,7 +94,11 @@ export class ChatSessionManager {
             history.lastUpdate = new Date().getTime();
         }
 
-        let userMessage: ChatMessage = { role: "user", content: prompt, created: new Date().getTime() };
+        const encoder = encoding_for_model(model);
+        const newMessage: ChatMessage = { role: "user", content: message };
+        const newMessageTokens = encoder.encode(JSON.stringify(newMessage)).length;
+
+        let userMessage: ChatMessage = { ...newMessage, created: new Date().getTime() };
 
         const apiUrl = 'https://api.openai.com/v1/chat/completions';
         const headers = {
@@ -66,27 +106,27 @@ export class ChatSessionManager {
             'Authorization': `Bearer ${OPENAI_API_KEY}`,
         };
 
-        const messages = history.messages.map((msg) => ({ role: msg.role, content: msg.content }));
-
-        const data = {
-            model: model,
-            messages: [...messages, { role: userMessage.role, content: userMessage.content }],
-            max_tokens: this.max_tokens,
-            n: 1,
-            stop: null,
-            temperature: this.temperature,
-        };
-
         try {
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - this.max_tokens - 100);
+            const messages = extractMessage.map((msg) => ({ role: msg.role, content: msg.content }));
+
+            const data = {
+                model: model,
+                messages: [...messages, { role: userMessage.role, content: userMessage.content }],
+                max_tokens: this.max_tokens,
+                n: 1,
+                stop: null,
+                temperature: this.temperature,
+            };
+
             const response = await axios.post(apiUrl, data, { headers });
 
             const content = response.data.choices[0].message.content;
-            const promptTokens = response.data.usage.prompt_tokens;
             const completionTokens = response.data.usage.completion_tokens;
             const totalTokens = response.data.usage.total_tokens;
 
             let assistantMessage: ChatMessage = { role: "assistant", content: content, token: completionTokens, created: new Date().getTime() };
-            userMessage.token = promptTokens;
+            userMessage.token = newMessageTokens;
             history.messages.push(userMessage);
             history.messages.push(assistantMessage);
             history.totalTokens += totalTokens;
@@ -94,12 +134,17 @@ export class ChatSessionManager {
             await this.session.putItem(sessionId, history);
             return history.messages;
         } catch (error) {
-            console.error('Error while fetching data from OpenAI API:', error);
+            if (isAxiosError(error) && error?.response?.data?.error) {
+                console.error('Error while fetching data from OpenAI API:', error.response.data.error);
+            } else {
+                console.error('Error while fetching data from OpenAI API:', error);
+            }
+
             throw error;
         }
     }
 
-    async getAnswerStream(sessionId: string, prompt: string, model: TiktokenModel = "gpt-3.5-turbo") {
+    async getAnswerStream(sessionId: string, message: string, model: TiktokenModel = "gpt-3.5-turbo", callback?: (data: ChatData) => void) {
         let history = await this.session.getItem(sessionId);
 
         if (history == null) {
@@ -109,11 +154,10 @@ export class ChatSessionManager {
         }
 
         const encoder = encoding_for_model(model);
+        const newMessage: ChatMessage = { role: "user", content: message };
+        const newMessageTokens = encoder.encode(JSON.stringify(newMessage)).length;
+        const userMessage: ChatMessage = { ...newMessage, created: new Date().getTime(), token: newMessageTokens };
 
-        let tokens = encoder.encode(prompt);
-
-        const userMessage: ChatMessage = { role: 'user', content: prompt, created: new Date().getTime(), token: tokens.length };
-        
         history.totalTokens += userMessage.token;
 
         const apiUrl = 'https://api.openai.com/v1/chat/completions';
@@ -122,19 +166,20 @@ export class ChatSessionManager {
             Authorization: `Bearer ${OPENAI_API_KEY}`,
         };
 
-        const messages = history.messages.map((msg) => ({ role: msg.role, content: msg.content }));
-
-        const data = {
-            model,
-            messages: [...messages, { role: userMessage.role, content: userMessage.content }],
-            max_tokens: this.max_tokens,
-            n: 1,
-            stop: null,
-            temperature: this.temperature,
-            stream: true
-        };
-
         try {
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - this.max_tokens);
+            const messages = extractMessage.map((msg) => ({ role: msg.role, content: msg.content }));
+
+            const data = {
+                model,
+                messages: [...messages, { role: userMessage.role, content: userMessage.content }],
+                max_tokens: this.max_tokens,
+                n: 1,
+                stop: null,
+                temperature: this.temperature,
+                stream: true
+            };
+
             const response = await axios.post(apiUrl, data, {
                 headers,
                 responseType: 'stream',
@@ -142,10 +187,10 @@ export class ChatSessionManager {
 
             const assistantMessage: ChatMessage = {
                 role: 'assistant',
-                content: '',
-                token: 0,
-                created: 0,
+                content: ''
             };
+
+            let created = new Date().getTime();
 
             history.messages.push(userMessage);
             history.messages.push(assistantMessage);
@@ -170,8 +215,9 @@ export class ChatSessionManager {
                         if (line.startsWith(':')) continue; // ignore sse comment message
 
                         if (line === 'data: [DONE]') {
-                            assistantMessage.token = encoder.encode(assistantMessage.content).length;
+                            assistantMessage.token = encoder.encode(JSON.stringify(assistantMessage)).length;
                             history.totalTokens += assistantMessage.token;
+                            history.created = created;
 
                             encoder.free();
                             tokenCaculate = true;
@@ -180,10 +226,6 @@ export class ChatSessionManager {
 
                         try {
                             const json = JSON.parse(line.substring(6));
-
-                            if (assistantMessage.created == 0) {
-                                assistantMessage.created = new Date().getTime();
-                            }
 
                             const delta = json.choices[0].delta.content;
 
@@ -202,28 +244,39 @@ export class ChatSessionManager {
 
             dataStream.on('close', async () => {
                 if (tokenCaculate == false) {
-                    assistantMessage.token = encoder.encode(assistantMessage.content).length;
+                    assistantMessage.token = encoder.encode(JSON.stringify(assistantMessage)).length;
                     history.totalTokens += assistantMessage.token;
-                    encoder.free();   
-                    tokenCaculate = true;                
-                }
-
-                if ( saved == false) {
-                    await this.session.putItem(sessionId, history);
-                    saved = true;
-                }                
-            });
-            dataStream.on('finish', async () => {
-                if (tokenCaculate == false) {
-                    assistantMessage.token = encoder.encode(assistantMessage.content).length;
-                    history.totalTokens += assistantMessage.token;
+                    history.created = created;
                     encoder.free();
                     tokenCaculate = true;
                 }
 
-                if ( saved == false) {
-                    await this.session.putItem(sessionId, history);
+                if (saved == false) {
                     saved = true;
+                    await this.session.putItem(sessionId, history);
+
+                    if ( callback ) {
+                        callback(history);
+                    }
+                    
+                }
+            });
+            dataStream.on('finish', async () => {
+                if (tokenCaculate == false) {
+                    assistantMessage.token = encoder.encode(JSON.stringify(assistantMessage)).length;
+                    history.totalTokens += assistantMessage.token;
+                    history.created = created;
+                    encoder.free();
+                    tokenCaculate = true;
+                }
+
+                if (saved == false) {
+                    saved = true;
+                    await this.session.putItem(sessionId, history);                   
+                    
+                    if (callback) {
+                        callback(history);
+                    }
                 }
             });
 
@@ -231,7 +284,10 @@ export class ChatSessionManager {
 
             return dataStream;
         } catch (error) {
-            console.error('Error while fetching data from OpenAI API:', error);
+            if (isAxiosError(error)) {
+                console.error('Error while fetching data from OpenAI API');
+            }
+
             throw error;
         }
     }
