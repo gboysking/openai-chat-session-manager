@@ -110,7 +110,7 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - options?.max_tokens || this.options.max_tokens - 100);
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100);
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
             const data = {
@@ -170,7 +170,7 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - options?.max_tokens || this.options.max_tokens);
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100);
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
             history.totalTokens += extractMessage.tokenSum;
             
