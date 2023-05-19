@@ -1,6 +1,6 @@
 {
     "name": "openai-chat-session-manager",
-    "version": "1.1.3",
+    "version": "1.1.4",
     "description": "OpenAI Chat Session Manager is a TypeScript module designed to manage chat sessions with an AI model (default : GPT-3.5 Turbo) through the OpenAI API.",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",

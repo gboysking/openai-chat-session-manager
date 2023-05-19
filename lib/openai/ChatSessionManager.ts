@@ -30,11 +30,12 @@ export interface ChatSessionManagerOptions {
     session?: ChatSession;
     max_tokens?: number;
     temperature?: number;
+    api_key?: string;
 }
 
 function calculateTokenSum(messages: ChatMessage[]): number {
     const tokenValues = messages.map((message) => message.token || 0);
-    const tokenSum = tokenValues.reduce((sum, value) => sum + value, 0);
+    const tokenSum = tokenValues.reduce((sum, value) => sum + value + 2, 0);
     return tokenSum;
 }
 
@@ -42,19 +43,19 @@ function extractMessagesWithinTokenLimit(
     messages: ChatMessage[],
     messageTokens: number,
     maxRequestTokens: number
-): ChatMessage[] {
+): { messages: ChatMessage[], tokenSum: number } {
     let tokenSum = calculateTokenSum(messages);
     while (tokenSum + messageTokens > maxRequestTokens) {
         const deletedMessage = messages.shift();
         if (deletedMessage) {
-            const deletedMessageTokens = deletedMessage.token || 0;
+            const deletedMessageTokens = deletedMessage.token + 2 || 0;
             tokenSum -= (deletedMessageTokens);
         } else {
             break; // No more messages to delete
         }
     }
 
-    return messages;
+    return { messages, tokenSum };
 }
 
 function requestMaxTokens(model: TiktokenModel = "gpt-3.5-turbo"): number {
@@ -70,8 +71,7 @@ function requestMaxTokens(model: TiktokenModel = "gpt-3.5-turbo"): number {
 
 export class ChatSessionManager {
     private session: ChatSession;
-    private max_tokens: number;
-    private temperature: number;
+    private options: ChatSessionManagerOptions;
 
     constructor(options: ChatSessionManagerOptions) {
         if (options.session == null) {
@@ -80,11 +80,14 @@ export class ChatSessionManager {
             this.session = options.session;
         }
 
-        this.max_tokens = options.max_tokens ? options.max_tokens : 50;
-        this.temperature = options.temperature ? options.temperature : 1.0;
+        this.options = { ...options };
+
+        this.options.max_tokens = this.options.max_tokens || 50;
+        this.options.temperature = this.options.temperature || 1.0;
+
     }
 
-    async getAnswer(sessionId: string, message: string, model: TiktokenModel = "gpt-3.5-turbo"): Promise<ChatMessage[]> {
+    async getAnswer(sessionId: string, message: string, model: TiktokenModel = "gpt-3.5-turbo", options?: ChatSessionManagerOptions): Promise<ChatData> {
 
         let history: ChatData | null = await this.session.getItem(sessionId);
 
@@ -107,16 +110,16 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - this.max_tokens - 100);
-            const messages = extractMessage.map((msg) => ({ role: msg.role, content: msg.content }));
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - options?.max_tokens || this.options.max_tokens - 100);
+            const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
             const data = {
                 model: model,
                 messages: [...messages, { role: userMessage.role, content: userMessage.content }],
-                max_tokens: this.max_tokens,
+                max_tokens: options?.max_tokens || this.options.max_tokens,
                 n: 1,
                 stop: null,
-                temperature: this.temperature,
+                temperature: options?.max_tokens || this.options.temperature,
             };
 
             const response = await axios.post(apiUrl, data, { headers });
@@ -129,10 +132,10 @@ export class ChatSessionManager {
             userMessage.token = newMessageTokens;
             history.messages.push(userMessage);
             history.messages.push(assistantMessage);
-            history.totalTokens += totalTokens;
+            history.totalTokens = totalTokens;
 
             await this.session.putItem(sessionId, history);
-            return history.messages;
+            return history;
         } catch (error) {
             if (isAxiosError(error) && error?.response?.data?.error) {
                 console.error('Error while fetching data from OpenAI API:', error.response.data.error);
@@ -144,7 +147,7 @@ export class ChatSessionManager {
         }
     }
 
-    async getAnswerStream(sessionId: string, message: string, model: TiktokenModel = "gpt-3.5-turbo", callback?: (data: ChatData) => void) {
+    async getAnswerStream(sessionId: string, message: string, model: TiktokenModel = "gpt-3.5-turbo", options?: ChatSessionManagerOptions, callback?: (data: ChatData) => void) {
         let history = await this.session.getItem(sessionId);
 
         if (history == null) {
@@ -158,7 +161,7 @@ export class ChatSessionManager {
         const newMessageTokens = encoder.encode(JSON.stringify(newMessage)).length;
         const userMessage: ChatMessage = { ...newMessage, created: new Date().getTime(), token: newMessageTokens };
 
-        history.totalTokens += userMessage.token;
+        history.totalTokens = userMessage.token;
 
         const apiUrl = 'https://api.openai.com/v1/chat/completions';
         const headers = {
@@ -167,16 +170,17 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - this.max_tokens);
-            const messages = extractMessage.map((msg) => ({ role: msg.role, content: msg.content }));
-
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - options?.max_tokens || this.options.max_tokens);
+            const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
+            history.totalTokens += extractMessage.tokenSum;
+            
             const data = {
                 model,
                 messages: [...messages, { role: userMessage.role, content: userMessage.content }],
-                max_tokens: this.max_tokens,
+                max_tokens: options?.max_tokens || this.options.max_tokens,
                 n: 1,
                 stop: null,
-                temperature: this.temperature,
+                temperature: options?.temperature || this.options.temperature,
                 stream: true
             };
 
@@ -255,10 +259,10 @@ export class ChatSessionManager {
                     saved = true;
                     await this.session.putItem(sessionId, history);
 
-                    if ( callback ) {
+                    if (callback) {
                         callback(history);
                     }
-                    
+
                 }
             });
             dataStream.on('finish', async () => {
@@ -272,8 +276,8 @@ export class ChatSessionManager {
 
                 if (saved == false) {
                     saved = true;
-                    await this.session.putItem(sessionId, history);                   
-                    
+                    await this.session.putItem(sessionId, history);
+
                     if (callback) {
                         callback(history);
                     }
