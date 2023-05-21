@@ -106,7 +106,7 @@ export class ChatSessionManager {
         const apiUrl = 'https://api.openai.com/v1/chat/completions';
         const headers = {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            'Authorization': `Bearer ${options.api_key || OPENAI_API_KEY}`,
         };
 
         try {
@@ -166,7 +166,7 @@ export class ChatSessionManager {
         const apiUrl = 'https://api.openai.com/v1/chat/completions';
         const headers = {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            Authorization: `Bearer ${options.api_key || OPENAI_API_KEY}`,
         };
 
         try {
