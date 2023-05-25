@@ -1,6 +1,6 @@
 import axios, { isAxiosError } from "axios";
 import { ChatSessionDynamoDBTable } from "./ChatSessionDynamoDBTable";
-import { encoding_for_model, TiktokenModel } from "@dqbd/tiktoken";
+import { encoding_for_model, Tiktoken, TiktokenModel } from "@dqbd/tiktoken";
 import stream from "stream";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -33,18 +33,27 @@ export interface ChatSessionManagerOptions {
     api_key?: string;
 }
 
-function calculateTokenSum(messages: ChatMessage[]): number {
-    const tokenValues = messages.map((message) => message.token || 0);
-    const tokenSum = tokenValues.reduce((sum, value) => sum + value + 2, 0);
-    return tokenSum;
+function calculateTokenSum(messages: ChatMessage[], encoder?: Tiktoken): number {
+    if (encoder) {
+        const conv_messages = messages.map((msg) => ({ role: msg.role, content: msg.content }));
+        const tokens = conv_messages.map((message) => encoder.encode(JSON.stringify(message)).length);
+        const tokenSum = tokens.reduce((sum, value) => sum + value + 2, 0);
+        messages.map((msg, index) => { msg.token = tokens[index] });
+        return tokenSum;
+    } else {
+        const tokenValues = messages.map((message) => message.token || 0);
+        const tokenSum = tokenValues.reduce((sum, value) => sum + value + 2, 0);
+        return tokenSum;
+    }
 }
 
 function extractMessagesWithinTokenLimit(
     messages: ChatMessage[],
     messageTokens: number,
-    maxRequestTokens: number
+    maxRequestTokens: number,
+    encoder?: Tiktoken,
 ): { messages: ChatMessage[], tokenSum: number } {
-    let tokenSum = calculateTokenSum(messages);
+    let tokenSum = calculateTokenSum(messages, encoder);
     while (tokenSum + messageTokens > maxRequestTokens) {
         const deletedMessage = messages.shift();
         if (deletedMessage) {
@@ -110,7 +119,7 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100);
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder);
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
             const data = {
@@ -170,10 +179,10 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100);
+            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder);
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
             history.totalTokens += extractMessage.tokenSum;
-            
+
             const data = {
                 model,
                 messages: [...messages, { role: userMessage.role, content: userMessage.content }],
