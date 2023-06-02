@@ -199,8 +199,6 @@ export class ChatSessionManager {
                 stream: true
             };
 
-            console.log(data);
-
             const response = await axios.post(apiUrl, data, {
                 headers,
                 responseType: 'stream',
