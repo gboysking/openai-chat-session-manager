@@ -31,6 +31,10 @@ export interface ChatSessionManagerOptions {
     max_tokens?: number;
     temperature?: number;
     api_key?: string;
+    extractMessages?: (messages: ChatMessage[],
+        messageTokens: number,
+        maxRequestTokens: number,
+        encoder?: Tiktoken) => { messages: ChatMessage[], tokenSum: number };
 }
 
 function calculateTokenSum(messages: ChatMessage[], encoder?: Tiktoken): number {
@@ -57,7 +61,7 @@ function extractMessagesWithinTokenLimit(
     while (tokenSum + messageTokens > maxRequestTokens) {
         const deletedMessage = messages.shift();
         if (deletedMessage) {
-            const deletedMessageTokens = deletedMessage.token + 2 || 0;
+            const deletedMessageTokens = (deletedMessage.token || 0) + 2;
             tokenSum -= (deletedMessageTokens);
         } else {
             break; // No more messages to delete
@@ -119,7 +123,8 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder);
+            let extractMessage = options.extractMessages ? options.extractMessages([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder)
+                : extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder);
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
             const data = {
@@ -179,7 +184,8 @@ export class ChatSessionManager {
         };
 
         try {
-            let extractMessage = extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder);
+            let extractMessage = options.extractMessages ? options.extractMessages([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder)
+                : extractMessagesWithinTokenLimit([...history.messages], newMessageTokens, requestMaxTokens(model) - (options?.max_tokens || this.options.max_tokens) - 100, encoder);
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
             history.totalTokens += extractMessage.tokenSum;
 
@@ -192,6 +198,8 @@ export class ChatSessionManager {
                 temperature: options?.temperature || this.options.temperature,
                 stream: true
             };
+
+            console.log(data);
 
             const response = await axios.post(apiUrl, data, {
                 headers,
