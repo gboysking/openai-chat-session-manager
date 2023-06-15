@@ -128,7 +128,7 @@ export class ChatSessionManager {
             const messages = extractMessage.messages.map((msg) => ({ role: msg.role, content: msg.content }));
 
             const data = {
-                model: model,
+                model: process.env.MODEL_VERSION ? model + "-" + process.env.MODEL_VERSION : model,
                 messages: [...messages, { role: userMessage.role, content: userMessage.content }],
                 max_tokens: options?.max_tokens || this.options.max_tokens,
                 n: 1,
@@ -190,7 +190,7 @@ export class ChatSessionManager {
             history.totalTokens += extractMessage.tokenSum;
 
             const data = {
-                model,
+                model: process.env.MODEL_VERSION ? model + "-" + process.env.MODEL_VERSION : model,
                 messages: [...messages, { role: userMessage.role, content: userMessage.content }],
                 max_tokens: options?.max_tokens || this.options.max_tokens,
                 n: 1,
