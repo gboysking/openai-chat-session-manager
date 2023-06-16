@@ -136,7 +136,7 @@ export class ChatSessionManager {
                 temperature: options?.max_tokens || this.options.temperature,
             };
 
-            const response = await axios.post(apiUrl, data, { headers });
+            const response = await axios.post(apiUrl, data, { headers, timeout: 120 * 1000 });
 
             const content = response.data.choices[0].message.content;
             const completionTokens = response.data.usage.completion_tokens;
@@ -202,6 +202,7 @@ export class ChatSessionManager {
             const response = await axios.post(apiUrl, data, {
                 headers,
                 responseType: 'stream',
+                timeout: 120 * 1000
             });
 
             const assistantMessage: ChatMessage = {
