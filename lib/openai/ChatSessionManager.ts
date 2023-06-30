@@ -136,7 +136,7 @@ export class ChatSessionManager {
                 temperature: options?.max_tokens || this.options.temperature,
             };
 
-            const response = await axios.post(apiUrl, data, { headers, timeout: 120 * 1000 });
+            const response = await axios.post(apiUrl, data, { headers, timeout: 10 * 1000 });
 
             const content = response.data.choices[0].message.content;
             const completionTokens = response.data.usage.completion_tokens;
@@ -202,7 +202,7 @@ export class ChatSessionManager {
             const response = await axios.post(apiUrl, data, {
                 headers,
                 responseType: 'stream',
-                timeout: 120 * 1000
+                timeout: 5 * 1000
             });
 
             const assistantMessage: ChatMessage = {
@@ -305,6 +305,7 @@ export class ChatSessionManager {
             return dataStream;
         } catch (error) {
             if (isAxiosError(error)) {
+                console.log(error.toJSON());
                 console.error('Error while fetching data from OpenAI API');
             }
 
